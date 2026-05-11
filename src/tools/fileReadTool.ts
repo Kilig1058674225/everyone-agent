@@ -1,27 +1,15 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
+import { readdir, readFile } from "node:fs/promises";
 import type { Tool, ToolContext, ToolResult } from "./Tool.js";
+import {
+  addLineNumbers,
+  isNodeError,
+  resolveWorkspacePath,
+} from "./utils.js";
 
 interface FileReadInput {
   file_path: string;
   offset: number;
   limit?: number;
-}
-
-function addLineNumbers(content: string, startLine: number): string {
-  const lines = content.split("\n");
-  const padWidth = String(startLine + lines.length - 1).length;
-
-  return lines
-    .map((line, index) => {
-      const lineNumber = String(startLine + index).padStart(padWidth, " ");
-      return `${lineNumber}\t${line}`;
-    })
-    .join("\n");
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }
 
 function parseInput(input: Record<string, unknown>): FileReadInput {
@@ -52,17 +40,6 @@ function parseInput(input: Record<string, unknown>): FileReadInput {
     offset: offset ?? 1,
     limit,
   };
-}
-
-function resolveInsideCwd(cwd: string, filePath: string): string {
-  const resolved = path.resolve(cwd, filePath);
-  const relative = path.relative(cwd, resolved);
-
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`File is outside the workspace: ${filePath}`);
-  }
-
-  return resolved;
 }
 
 export const fileReadTool: Tool = {
@@ -98,7 +75,7 @@ export const fileReadTool: Tool = {
       }
 
       const input = parseInput(rawInput);
-      const resolved = resolveInsideCwd(context.cwd, input.file_path);
+      const resolved = resolveWorkspacePath(input.file_path, context.cwd);
       const raw = await readFile(resolved, {
         encoding: "utf-8",
         signal: context.abortSignal,
@@ -131,8 +108,17 @@ export const fileReadTool: Tool = {
       }
 
       if (isNodeError(error) && error.code === "EISDIR") {
+        const inputPath =
+          typeof rawInput.file_path === "string" ? rawInput.file_path : "";
+        const resolved = resolveWorkspacePath(inputPath, context.cwd);
+        const entries = await readdir(resolved, { withFileTypes: true });
+        const listing = entries
+          .slice(0, 200)
+          .map((entry) => `${entry.isDirectory() ? "dir " : "file"}\t${entry.name}`)
+          .join("\n");
+
         return {
-          content: `Error: Path is a directory, not a file: ${String(rawInput.file_path)}`,
+          content: `Path is a directory: ${resolved}\n${listing || "(empty)"}`,
           isError: true,
         };
       }

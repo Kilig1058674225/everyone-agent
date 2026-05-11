@@ -4,7 +4,7 @@ export const DEFAULT_USER_AGENT =
   process.env.ANTHROPIC_USER_AGENT ||
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 export const DEFAULT_MODEL =
-  process.env.ANTHROPIC_MODEL || "gpt-5.4-mini";
+  process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
 
 function readNumberEnv(name: string, fallback: number): number {
   const value = process.env[name];
@@ -48,6 +48,7 @@ export function normalizeAnthropicBaseURL(
 
 export function getAnthropicClient(options?: {
   apiKey?: string;
+  authToken?: string;
   baseURL?: string;
   headers?: Record<string, string>;
 }): Anthropic {
@@ -56,7 +57,8 @@ export function getAnthropicClient(options?: {
   }
 
   const client = new Anthropic({
-    apiKey: options?.apiKey ?? process.env.ANTHROPIC_AUTH_TOKEN,
+    apiKey: options?.apiKey ?? process.env.ANTHROPIC_API_KEY,
+    authToken: options?.authToken ?? process.env.ANTHROPIC_AUTH_TOKEN,
     baseURL: normalizeAnthropicBaseURL(
       options?.baseURL ?? process.env.ANTHROPIC_BASE_URL,
     ),

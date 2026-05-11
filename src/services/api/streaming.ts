@@ -146,6 +146,7 @@ export async function* streamMessage(
       assistantMessage: { role: "assistant", content: contentBlocks },
       usage,
       stopReason: "error",
+      error,
     };
   }
 

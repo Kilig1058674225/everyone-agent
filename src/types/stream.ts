@@ -19,6 +19,7 @@ export interface StreamResult {
   assistantMessage: AssistantMessage;
   usage: Usage;
   stopReason: string;
+  error?: unknown;
 }
 
 export type StreamEvent =

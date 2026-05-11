@@ -21,6 +21,6 @@ export interface Tool {
   readonly inputSchema: JSONSchema;
 
   call(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult>;
-  isReadOnly(): boolean;
+  isReadOnly(input?: Record<string, unknown>): boolean;
   isEnabled(): boolean;
 }

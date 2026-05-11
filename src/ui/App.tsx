@@ -1,21 +1,9 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import { streamMessage } from "../services/api/index.js";
-import {
-  findToolByName,
-  getToolsApiParams,
-  type ToolContext,
-} from "../tools/index.js";
-import type {
-  ContentBlock,
-  Message,
-  StreamEvent,
-  StreamResult,
-  ToolResultBlock,
-} from "../types/index.js";
+import { query } from "../core/index.js";
+import { getToolsApiParams } from "../tools/index.js";
+import type { ContentBlock, Message } from "../types/index.js";
 import { Spinner } from "./components/Spinner.js";
-
-const MAX_TOOL_TURNS = 50;
 
 interface AppProps {
   model: string;
@@ -67,128 +55,6 @@ export function App({ model, system }: AppProps): ReactNode {
   const messagesRef = useRef<Message[]>([]);
   messagesRef.current = messages;
 
-  const runStreamingTurn = useCallback(
-    async (
-      currentMessages: Message[],
-      signal?: AbortSignal,
-    ): Promise<StreamResult | null> => {
-      const generator = streamMessage({
-        messages: [...currentMessages],
-        model,
-        system,
-        tools: toolsApiParams,
-        signal,
-      });
-
-      let accumulatedText = "";
-
-      while (true) {
-        const { value, done } = await generator.next();
-
-        if (done) {
-          return value ?? null;
-        }
-
-        const event: StreamEvent = value;
-
-        switch (event.type) {
-          case "text":
-            accumulatedText += event.text;
-            setStreamingText(accumulatedText);
-            break;
-
-          case "tool_use_start":
-            setToolCalls((prev) => [
-              ...prev,
-              { id: event.id, name: event.name },
-            ]);
-            setSpinnerLabel("Using tool");
-            break;
-
-          case "error":
-            if (!signal?.aborted) {
-              setErrorText(event.message);
-            }
-            return null;
-        }
-      }
-    },
-    [model, system, toolsApiParams],
-  );
-
-  const executeTools = useCallback(
-    async (
-      contentBlocks: ContentBlock[],
-      signal?: AbortSignal,
-    ): Promise<Message> => {
-      const toolUseBlocks = contentBlocks.filter(
-        (block): block is Extract<ContentBlock, { type: "tool_use" }> => {
-          return block.type === "tool_use";
-        },
-      );
-      const toolResults: ToolResultBlock[] = [];
-      const toolContext: ToolContext = {
-        cwd: process.cwd(),
-        abortSignal: signal,
-      };
-
-      for (const block of toolUseBlocks) {
-        if (signal?.aborted) {
-          break;
-        }
-
-        const tool = findToolByName(block.name);
-
-        if (!tool) {
-          const content = `Error: Unknown tool "${block.name}".`;
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: block.id,
-            content,
-            is_error: true,
-          });
-          setToolCalls((prev) =>
-            prev.map((toolCall) =>
-              toolCall.id === block.id
-                ? {
-                    ...toolCall,
-                    resultLength: content.length,
-                    isError: true,
-                  }
-                : toolCall,
-            ),
-          );
-          continue;
-        }
-
-        setSpinnerLabel(`Running ${tool.name}`);
-        const result = await tool.call(block.input, toolContext);
-
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: result.content,
-          ...(result.isError ? { is_error: true } : {}),
-        });
-
-        setToolCalls((prev) =>
-          prev.map((toolCall) =>
-            toolCall.id === block.id
-              ? {
-                  ...toolCall,
-                  resultLength: result.content.length,
-                  isError: result.isError,
-                }
-              : toolCall,
-          ),
-        );
-      }
-
-      return { role: "user", content: toolResults };
-    },
-    [],
-  );
-
   const handleSubmit = useCallback(
     async (text: string): Promise<void> => {
       const trimmed = text.trim();
@@ -235,58 +101,99 @@ export function App({ model, system }: AppProps): ReactNode {
       abortRef.current = abort;
 
       try {
-        let totalInputTokens = 0;
-        let totalOutputTokens = 0;
-        let turnCount = 0;
+        const loop = query({
+          messages: nextMessages,
+          model,
+          system,
+          tools: toolsApiParams,
+          toolContext: {
+            cwd: process.cwd(),
+            abortSignal: abort.signal,
+          },
+          signal: abort.signal,
+        });
 
-        while (turnCount < MAX_TOOL_TURNS) {
-          turnCount += 1;
-          setStreamingText("");
-          setSpinnerLabel("Thinking");
+        let accumulatedText = "";
 
-          const result = await runStreamingTurn(nextMessages, abort.signal);
+        while (true) {
+          const { value, done } = await loop.next();
 
-          if (!result || abort.signal.aborted) {
+          if (done) {
+            nextMessages = value.state.messages;
+            setMessages(nextMessages);
+            messagesRef.current = nextMessages;
+            setStreamingText("");
+            setLastUsage({
+              input: value.usage.input_tokens,
+              output: value.usage.output_tokens,
+            });
+
+            if (value.terminationReason === "aborted") {
+              setInfoMessage("Interrupted.");
+            } else if (value.terminationReason === "max_turns") {
+              setInfoMessage("Stopped after reaching the tool turn limit.");
+            } else if (value.terminationReason === "model_error") {
+              setErrorText(
+                value.error instanceof Error
+                  ? value.error.message
+                  : value.error
+                    ? String(value.error)
+                    : "Model request failed.",
+              );
+            }
+
             break;
           }
 
-          totalInputTokens += result.usage.input_tokens;
-          totalOutputTokens += result.usage.output_tokens;
-
-          const assistantMessage: Message = result.assistantMessage;
-          nextMessages = [...nextMessages, assistantMessage];
-          setMessages(nextMessages);
-          messagesRef.current = nextMessages;
-          setStreamingText("");
-
-          const contentBlocks = result.assistantMessage.content;
-
-          if (
-            result.stopReason === "tool_use" &&
-            Array.isArray(contentBlocks)
-          ) {
-            const toolResultMessage = await executeTools(
-              contentBlocks,
-              abort.signal,
-            );
-
-            if (abort.signal.aborted) {
+          switch (value.type) {
+            case "turn_start":
+              accumulatedText = "";
+              setStreamingText("");
+              setSpinnerLabel("Thinking");
               break;
-            }
 
-            nextMessages = [...nextMessages, toolResultMessage];
-            setMessages(nextMessages);
-            messagesRef.current = nextMessages;
-            continue;
+            case "text":
+              accumulatedText += value.text;
+              setStreamingText(accumulatedText);
+              break;
+
+            case "tool_use_start":
+              setToolCalls((prev) => [
+                ...prev,
+                { id: value.id, name: value.name },
+              ]);
+              setSpinnerLabel(`Running ${value.name}`);
+              break;
+
+            case "tool_use_done":
+              setToolCalls((prev) =>
+                prev.map((toolCall) =>
+                  toolCall.id === value.id
+                    ? {
+                        ...toolCall,
+                        resultLength: value.resultLength,
+                        isError: value.isError,
+                      }
+                    : toolCall,
+                ),
+              );
+              break;
+
+            case "assistant_message":
+            case "tool_result_message":
+              nextMessages = [...nextMessages, value.message];
+              setMessages(nextMessages);
+              messagesRef.current = nextMessages;
+              setStreamingText("");
+              break;
+
+            case "error":
+              if (!abort.signal.aborted) {
+                setErrorText(value.message);
+              }
+              break;
           }
-
-          break;
         }
-
-        setLastUsage({
-          input: totalInputTokens,
-          output: totalOutputTokens,
-        });
       } catch (error) {
         if (abort.signal.aborted) {
           setInfoMessage("Interrupted.");
@@ -298,7 +205,7 @@ export function App({ model, system }: AppProps): ReactNode {
         abortRef.current = null;
       }
     },
-    [executeTools, exit, runStreamingTurn],
+    [exit, model, system, toolsApiParams],
   );
 
   useInput((input, key) => {
