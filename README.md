@@ -1,8 +1,12 @@
 # everyone-agent
 
-一个基于 TypeScript、React Ink 和 Anthropic 兼容接口构建的终端 AI Agent。
+技术平权，人人可以构建自己的 Agent。
 
-项目目标是从零实现一个可在命令行中运行的 Agent：它可以和模型进行流式对话，维护会话上下文，并通过工具接口读取当前工作区文件，为后续扩展更多工具调用能力打基础。
+`everyone-agent` 是一个从零实现终端 AI Agent 的开源学习项目。它基于 TypeScript、React Ink 和 Anthropic 兼容接口构建，目标不是只给出一个“能用的工具”，而是把 Agent 的核心实现拆开、讲清楚，让更多人可以理解、修改，并构建属于自己的 Agent。
+
+这个项目相信：Agent 不应该只是少数人才能搭建的复杂系统。只要把流式通信、终端 UI、消息结构、工具调用和权限边界一步步拆开，普通开发者也可以掌握它。
+
+教程文档见 `/docs` 目录。
 
 ## 功能特性
 
@@ -154,13 +158,39 @@ node dist/entrypoint/cli.js
 
 ## 学习文档
 
-项目的 `docs/` 目录包含分阶段教程：
+项目的 `/docs` 目录包含分阶段教程，建议按顺序阅读：
+
+```txt
+docs/
+├── lesson-01-streaming-api/
+│   └── README.md
+├── lesson-02-ink-ui/
+│   └── README.md
+└── lesson-03-tool-interface/
+    └── README.md
+```
 
 - `docs/lesson-01-streaming-api/README.md`：打通 LLM 流式通信。
 - `docs/lesson-02-ink-ui/README.md`：用 React / Ink 构建终端 UI。
 - `docs/lesson-03-tool-interface/README.md`：设计工具接口，让 Agent 可以读取文件。
 
-建议按 lesson 顺序阅读，这样可以理解项目从流式 API、终端 UI 到工具调用的演进过程。
+### Lesson 01: 打通 LLM 流式通信
+
+对应目录：`docs/lesson-01-streaming-api/`
+
+这一节讲解如何从程序中向模型发送消息，并以流式方式接收模型回复。它重点拆解消息结构、流事件、客户端封装和最小可运行 demo，是整个 Agent 的通信基础。
+
+### Lesson 02: 用 React / Ink 构建终端 UI
+
+对应目录：`docs/lesson-02-ink-ui/`
+
+这一节把简单的流式 demo 升级成真正可交互的终端应用。内容包括持续输入、对话历史、loading 状态、错误展示、中断请求和基础快捷键。
+
+### Lesson 03: 设计 Tool 接口，让 AI 拥有双手
+
+对应目录：`docs/lesson-03-tool-interface/`
+
+这一节讲解 Agent 工具调用的基本机制：模型如何请求调用工具，程序如何执行工具，再把结果返回给模型。目前项目内置的 `Read` 文件读取工具就是在这一节中实现的。
 
 ## 常用命令
 
